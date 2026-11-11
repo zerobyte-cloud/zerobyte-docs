@@ -22,6 +22,10 @@ Each SDK has the same four layers. Most apps use only `Credentials`, `Relay` and
 | `Relay` | Talks HTTPS to a relay; implements the transport interface; opens the watch WebSocket |
 | `Link` | One side of a paired link: sequence numbers, claiming, replay protection, receiving and pruning |
 
+The Swift SDK has one more library, `ZeroByteTimeline`, from 1.2.0: one keyed state on both
+devices, synced as commits ([Timeline v1](../protocol/timeline.md)). The other SDKs do not have it
+yet.
+
 The transport is an interface (`RelayTransport`, `IRelayTransport` in .NET). `Relay` implements it
 over HTTPS; you can implement it in memory for tests, or over another channel.
 

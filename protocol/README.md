@@ -14,6 +14,7 @@ behind them and worked examples.
 | [Client behaviour](client-behaviour.md) | Claiming, choosing sequence numbers, receiving and pruning, persistence |
 | [Limits](limits.md) | Sizes, counts, idle expiry |
 | [Extensions](extensions.md) | Optional, per app: rate limits, push, signal, ICE |
+| [Timeline v1](timeline.md) | One keyed state on both devices, synced as commits on top of this protocol |
 | [Test vectors](test-vectors.md) | The known-answer file every implementation tests against |
 
 ## Conventions

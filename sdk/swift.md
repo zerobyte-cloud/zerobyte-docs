@@ -12,18 +12,20 @@
 ## Install
 
 In Xcode: File > Add Package Dependencies, enter
-`https://github.com/zerobyte-cloud/zerobyte-swift-sdk.git`, and choose version 1.0.0 or later.
+`https://github.com/zerobyte-cloud/zerobyte-swift-sdk.git`, and choose version 1.2.0 or later.
+`ZeroByteTimeline` needs 1.2.0; the other libraries work from 1.0.0.
 
 In `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/zerobyte-cloud/zerobyte-swift-sdk.git", from: "1.0.0")
+    .package(url: "https://github.com/zerobyte-cloud/zerobyte-swift-sdk.git", from: "1.2.0")
 ],
 targets: [
     .target(name: "MyApp", dependencies: [
         .product(name: "ZeroByte", package: "zerobyte-swift-sdk"),
         .product(name: "ZeroBytePush", package: "zerobyte-swift-sdk"),   // only with APNs
+        .product(name: "ZeroByteTimeline", package: "zerobyte-swift-sdk"),   // only for a timeline
     ])
 ]
 ```
@@ -32,6 +34,7 @@ targets: [
 |---|---|
 | `ZeroByte` | Links, envelopes, the relay, push registration, signal and ICE |
 | `ZeroBytePush` | APNs registrations and push payloads, for apps that use Apple push notifications |
+| `ZeroByteTimeline` | One keyed state both devices keep, synced as commits that merge into one timeline |
 
 ## Set up a link
 
@@ -161,6 +164,40 @@ for await event in await channel.events() {
     }
 }
 ```
+
+## Timeline
+
+`ZeroByteTimeline` keeps one keyed state on both devices and sends only what changed, as commits
+that every device merges into the same order ([Timeline v1](../protocol/timeline.md)). A key's
+entry is the one with the latest stamp, so both copies converge whatever order things arrive in,
+and a change made after seeing another always wins over it.
+
+```swift
+import ZeroByteTimeline
+
+var timeline = (try? Timeline(encoded: saved)) ?? Timeline()
+
+// Setting a key to the value it already holds stages nothing.
+try timeline.set(planData, at: TimelineSlot("plan", plan.id.uuidString))
+
+let outcome = try await TimelineRelay.sync(
+    &timeline, credentials: credentials, transport: relay,
+    sends: .companionToPrimary, notify: .silent
+) { save($0.encoded()) }
+
+for update in outcome.updates {
+    apply(update.slot, update.value)  // nil: deleted
+}
+```
+
+- `sync` reads and merges, persists, prunes, commits, answers a catch-up and writes, in that
+  order. It calls the closure to persist after reading and after writing; save the timeline there.
+- A device that can produce its own values again (from a database, say) creates its timeline with
+  `forgetsOwnValues:` naming those collections and passes `values:` to `sync`; the timeline then
+  keeps only their digests.
+- Two devices on the same network can skip the relay: send `timeline.state()`, answer the other's
+  state with `timeline.catchUp(after:)` and `receive` each part.
+- A value must fit in one message (1 MiB); split larger values over keys.
 
 ## Unpair
 
@@ -327,6 +364,49 @@ public enum Wire {
     public static func join(_ envelopes: [Data]) -> Data
     public static func split(_ data: Data) throws -> [Data]
 }
+```
+
+### Timeline
+
+```swift
+// ZeroByteTimeline
+public struct TimelineSlot: Hashable, Comparable {
+    public init(_ collection: String, _ key: String)
+    public let collection: String, key: String
+}
+
+public struct Timeline {
+    public init(replica: ReplicaID = .random(), forgetsOwnValues: Set<String> = [],
+                maximumMessageBytes: Int = TimelineLimits.maximumMessageBytes)
+    public init(encoded data: Data) throws
+    public func encoded() -> Data
+    public func value(_ slot: TimelineSlot) -> Data?
+    public func entries(in collection: String) -> [TimelineEntry]
+    @discardableResult public mutating func set(_ value: Data, at slot: TimelineSlot) throws -> Bool
+    @discardableResult public mutating func delete(_ slot: TimelineSlot) throws -> Bool
+    public var hasPendingChanges: Bool
+    public mutating func receive(_ data: Data) throws -> TimelineReceipt
+    public func state(request: TimelineRequest = []) -> TimelineMessage
+    public func catchUp(after requesterHeads: [ReplicaID: TimelineHead], includingOwn: Bool = true,
+                        values: (TimelineSlot) -> Data? = { _ in nil }) -> [TimelineMessage]
+}
+
+public enum TimelineRelay {
+    public static func sync(_ timeline: inout Timeline, credentials: Credentials,
+                            transport: any RelayTransport, sends: Direction, now: Date = Date(),
+                            commitBudget: Int? = nil, notify: Notify = .none,
+                            values: (TimelineSlot) -> Data? = { _ in nil },
+                            persist: (Timeline) async throws -> Void) async throws
+        -> TimelineSyncOutcome            // updates, merged, written, waiting, isPeerCurrent
+}
+
+public enum TimelineLimits {
+    public static let maximumMessageBytes = 1_048_576
+    public static let maximumCollectionBytes = 64
+    public static let maximumKeyBytes = 1_024
+}
+
+public enum TimelineError: Error { case malformed, unsupportedVersion, tooLarge, diverged }
 ```
 
 ### Errors

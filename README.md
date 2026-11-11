@@ -35,6 +35,7 @@ This repository is the source; if the two differ, this repository is current.
 - [Client behaviour](protocol/client-behaviour.md)
 - [Limits](protocol/limits.md)
 - [Extensions: push, signal, ICE](protocol/extensions.md)
+- [Timeline v1](protocol/timeline.md): one state kept on both devices, synced as commits
 - [Test vectors](protocol/test-vectors.md)
 
 ### Running a relay
