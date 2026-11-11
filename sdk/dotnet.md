@@ -2,7 +2,7 @@
 
 [zerobyte-dotnet-sdk](https://github.com/zerobyte-cloud/zerobyte-dotnet-sdk). Apache-2.0. Package
 ids `ZeroByte` and, for apps that use push notifications, `ZeroByte.Apns` (Apple) and
-`ZeroByte.Fcm` (Android).
+`ZeroByte.Fcm` (Android); `ZeroByte.Timeline` for a [timeline](#timeline).
 
 | | |
 |---|---|
@@ -16,7 +16,7 @@ The package is not on NuGet yet. Reference the project directly, or build a pack
 from a local folder:
 
 ```sh
-git clone --branch v1.1.0 https://github.com/zerobyte-cloud/zerobyte-dotnet-sdk.git
+git clone --branch v1.2.0 https://github.com/zerobyte-cloud/zerobyte-dotnet-sdk.git
 dotnet pack zerobyte-dotnet-sdk/src/ZeroByte -o ./packages
 dotnet add package ZeroByte --source ./packages
 ```
@@ -27,6 +27,7 @@ Or, as a project reference:
 dotnet add reference ../zerobyte-dotnet-sdk/src/ZeroByte/ZeroByte.csproj
 dotnet add reference ../zerobyte-dotnet-sdk/src/ZeroByte.Apns/ZeroByte.Apns.csproj   # only with APNs
 dotnet add reference ../zerobyte-dotnet-sdk/src/ZeroByte.Fcm/ZeroByte.Fcm.csproj     # only with FCM
+dotnet add reference ../zerobyte-dotnet-sdk/src/ZeroByte.Timeline/ZeroByte.Timeline.csproj   # only for a timeline
 ```
 
 ## Platform support
@@ -166,6 +167,40 @@ await foreach (var e in channel.EventsAsync(ct))
 }
 // channel.CloseCode: 4000 replaced by a newer connection, 1003/1009 bad frame, 1008 rate limited
 ```
+
+## Timeline
+
+`ZeroByte.Timeline` keeps one keyed state on both devices and sends only what changed, as commits
+that every device merges into the same order ([Timeline v1](../protocol/timeline.md)). A key's
+entry is the one with the latest stamp, so both copies converge whatever order things arrive in,
+and a change made after seeing another always wins over it.
+
+```csharp
+using ZeroByte.Timeline;
+
+var timeline = File.Exists(path) ? Timeline.Decode(File.ReadAllBytes(path)) : new Timeline();
+
+// Setting a key to the value it already holds stages nothing.
+timeline.Set(new TimelineSlot("plan", plan.Id), planBytes);
+
+var outcome = await TimelineRelay.SyncAsync(
+    timeline, credentials, relay, Direction.C2P,
+    persist: t => File.WriteAllBytesAsync(path, t.Encode()),
+    notify: Notify.Silent);
+
+foreach (var update in outcome.Updates)
+    Apply(update.Slot, update.Value);                       // null: deleted
+```
+
+- `SyncAsync` reads and merges, persists, prunes, commits, answers a catch-up and writes, in that
+  order. It calls `persist` after reading and after writing; save the timeline there.
+- A device that can produce its own values again (from a database, say) creates its timeline with
+  `forgetsOwnValues` naming those collections and passes `values` to `SyncAsync`; the timeline
+  then keeps only their digests.
+- Two devices on the same network can skip the relay: send `timeline.State().Encode()`, answer the
+  other's state with `timeline.CatchUp(heads)` and `Receive` each part.
+- A value must fit in one message (1 MiB); split larger values over keys.
+- A `Timeline` is not thread-safe: run one `SyncAsync` per timeline at a time.
 
 ## Unpair
 
@@ -313,6 +348,46 @@ public static class Fcm
     public static PushRegistration Registration(string token, string tag, string? alert = null);
     public static FcmPush? Parse(IReadOnlyDictionary<string, string> data);
 }
+
+// ZeroByte.Timeline
+public sealed class TimelineSlot(string collection, string key);   // Collection, Key
+
+public sealed class Timeline
+{
+    public Timeline(ReplicaID? replica = null, IEnumerable<string>? forgetsOwnValues = null,
+                    int maximumMessageBytes = TimelineLimits.MaxMessageBytes);
+    public static Timeline Decode(ReadOnlySpan<byte> data);
+    public byte[] Encode();
+    public byte[]? Value(TimelineSlot slot);
+    public List<TimelineEntry> Entries(string collection);
+    public bool Set(TimelineSlot slot, ReadOnlySpan<byte> value);
+    public bool Delete(TimelineSlot slot);
+    public bool HasPendingChanges { get; }
+    public TimelineReceipt Receive(ReadOnlySpan<byte> data);
+    public TimelineMessage.State State(TimelineRequest request = TimelineRequest.None);
+    public List<TimelineMessage.CatchUp> CatchUp(
+        IReadOnlyDictionary<ReplicaID, TimelineHead> requesterHeads, bool includingOwn = true,
+        Func<TimelineSlot, byte[]?>? values = null);
+}
+
+public static class TimelineRelay
+{
+    public static Task<TimelineSyncOutcome> SyncAsync(
+        Timeline timeline, Credentials credentials, IRelayTransport transport, Direction sends,
+        Func<Timeline, Task> persist, Notify notify = Notify.None, int? commitBudget = null,
+        Func<TimelineSlot, byte[]?>? values = null, long? now = null,
+        CancellationToken ct = default);   // Updates, Merged, Written, Waiting, IsPeerCurrent
+}
+
+public static class TimelineLimits
+{
+    public const int MaxMessageBytes = 1_048_576;
+    public const int MaxCollectionBytes = 64;
+    public const int MaxKeyBytes = 1_024;
+}
+
+public sealed class TimelineException(string code) : Exception   // Code: malformed,
+                                                                 // unsupported_version, too_large, diverged
 
 public interface IRelayTransport
 {

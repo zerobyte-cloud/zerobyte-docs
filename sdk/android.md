@@ -8,14 +8,14 @@
 | Language | Kotlin, usable from Java |
 | Uses | `javax.crypto` (ChaCha20-Poly1305, HmacSHA256), `java.security.MessageDigest`, `HttpURLConnection` |
 | Dependencies | Kotlin standard library only; the optional `zerobyte-okhttp` adds OkHttp for the WebSockets |
-| Coordinates | `cloud.zerobyte:zerobyte:1.1.0`, `cloud.zerobyte:zerobyte-okhttp:1.1.0` |
+| Coordinates | `cloud.zerobyte:zerobyte:1.2.0`, `cloud.zerobyte:zerobyte-okhttp:1.2.0`, `cloud.zerobyte:zerobyte-timeline:1.2.0` |
 
 ## Install
 
 The library is not on Maven Central yet. Publish it to your local Maven repository:
 
 ```sh
-git clone --branch v1.1.0 https://github.com/zerobyte-cloud/zerobyte-android-sdk.git
+git clone --branch v1.2.0 https://github.com/zerobyte-cloud/zerobyte-android-sdk.git
 cd zerobyte-android-sdk
 ./gradlew publishToMavenLocal
 ```
@@ -34,8 +34,9 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("cloud.zerobyte:zerobyte:1.1.0")
-    implementation("cloud.zerobyte:zerobyte-okhttp:1.1.0")   // watch and signal sockets
+    implementation("cloud.zerobyte:zerobyte:1.2.0")
+    implementation("cloud.zerobyte:zerobyte-okhttp:1.2.0")     // watch and signal sockets
+    implementation("cloud.zerobyte:zerobyte-timeline:1.2.0")   // only for a timeline
 }
 ```
 
@@ -175,6 +176,43 @@ Without `zerobyte-okhttp`, open `relay.signalURL(sends)` like the watch socket a
 message through `relay.signalSession(sends)` (one per connection): `onText`, `onBinary` and
 `seal`. Close code 4000 means a newer connection of the same side replaced this one; 1003 or 1009
 a bad frame; 1008 rate limited.
+
+## Timeline
+
+`zerobyte-timeline` keeps one keyed state on both devices and sends only what changed, as commits
+that every device merges into the same order ([Timeline v1](../protocol/timeline.md)). A key's
+entry is the one with the latest stamp, so both copies converge whatever order things arrive in,
+and a change made after seeing another always wins over it.
+
+```kotlin
+import cloud.zerobyte.timeline.*
+
+val timeline = saved?.let(Timeline::decode) ?: Timeline()
+
+// Setting a key to the value it already holds stages nothing.
+timeline.set(TimelineSlot("plan", plan.id), planBytes)
+
+val outcome = withContext(Dispatchers.IO) {        // blocking, like the relay calls
+    TimelineRelay.sync(
+        timeline, credentials, relay, Direction.C2P,
+        notify = Notify.SILENT,
+    ) { save(it.encoded()) }
+}
+
+for (update in outcome.updates) {
+    apply(update.slot, update.value)  // null: deleted
+}
+```
+
+- `sync` reads and merges, persists, prunes, commits, answers a catch-up and writes, in that
+  order. It calls the closure to persist after reading and after writing; save the timeline there.
+- A device that can produce its own values again (from a database, say) creates its timeline with
+  `forgetsOwnValues` naming those collections and passes `values` to `sync`; the timeline then
+  keeps only their digests.
+- Two devices on the same network can skip the relay: send `timeline.state().encoded()`, answer
+  the other's state with `timeline.catchUp(heads)` and `receive` each part.
+- A value must fit in one message (1 MiB); split larger values over keys.
+- A `Timeline` is not thread-safe: use it from one thread at a time.
 
 ## Unpair
 
@@ -350,6 +388,49 @@ class SignalSocket : Closeable { fun send(plaintext: ByteArray): Boolean }
 ```
 
 Callbacks run on OkHttp's threads.
+
+### `zerobyte-timeline`
+
+```kotlin
+package cloud.zerobyte.timeline
+
+class TimelineSlot(val collection: String, val key: String) : Comparable<TimelineSlot>
+
+class Timeline @JvmOverloads constructor(
+    val replica: ReplicaID = ReplicaID.random(),
+    forgetsOwnValues: Set<String> = emptySet(),
+    maximumMessageBytes: Int = TimelineLimits.MAX_MESSAGE_BYTES,
+) {
+    fun encoded(): ByteArray
+    fun value(slot: TimelineSlot): ByteArray?
+    fun entries(collection: String): List<TimelineEntry>
+    fun set(slot: TimelineSlot, value: ByteArray): Boolean
+    fun delete(slot: TimelineSlot): Boolean
+    val hasPendingChanges: Boolean
+    fun receive(data: ByteArray): TimelineReceipt
+    fun state(request: TimelineRequest = TimelineRequest.NONE): TimelineMessage.State
+    fun catchUp(requesterHeads: Map<ReplicaID, TimelineHead>, includingOwn: Boolean = true,
+                values: (TimelineSlot) -> ByteArray? = { null }): List<TimelineMessage.CatchUp>
+    companion object { fun decode(data: ByteArray): Timeline }
+}
+
+object TimelineRelay {
+    fun sync(timeline: Timeline, credentials: Credentials, transport: RelayTransport,
+             sends: Direction, now: Long = System.currentTimeMillis(), commitBudget: Int? = null,
+             notify: Notify = Notify.NONE, values: (TimelineSlot) -> ByteArray? = { null },
+             persist: (Timeline) -> Unit): TimelineSyncOutcome
+        // updates, merged, written, waiting, isPeerCurrent
+}
+
+object TimelineLimits {
+    const val MAX_MESSAGE_BYTES = 1_048_576
+    const val MAX_COLLECTION_BYTES = 64
+    const val MAX_KEY_BYTES = 1_024
+}
+
+class TimelineException(val code: String) : Exception   // malformed, unsupported_version,
+                                                        // too_large, diverged
+```
 
 ### `RelayTransport`
 

@@ -7,7 +7,7 @@ this page apply to all of them.
 |---|---|---|---|---|
 | Swift | iOS 16, macOS 13, watchOS 9, tvOS 16, visionOS 1 | CryptoKit | None | [swift.md](swift.md) |
 | Kotlin | Android API 28, any JVM 11 | `javax.crypto` | Kotlin standard library | [android.md](android.md) |
-| JavaScript | Browsers, Node 20, Deno, Bun, Cloudflare Workers | WebCrypto, `@noble/ciphers` | `@noble/ciphers` | [javascript.md](javascript.md) |
+| JavaScript | Browsers, Node 20, Deno, Bun, Cloudflare Workers | WebCrypto, `@noble/ciphers` | `@noble/ciphers`, `@noble/hashes` | [javascript.md](javascript.md) |
 | .NET | .NET 10 on Windows 10 20H2+, Linux, macOS | `System.Security.Cryptography` | None | [dotnet.md](dotnet.md) |
 
 ## Layers
@@ -22,9 +22,10 @@ Each SDK has the same four layers. Most apps use only `Credentials`, `Relay` and
 | `Relay` | Talks HTTPS to a relay; implements the transport interface; opens the watch WebSocket |
 | `Link` | One side of a paired link: sequence numbers, claiming, replay protection, receiving and pruning |
 
-The Swift SDK has one more library, `ZeroByteTimeline`, from 1.2.0: one keyed state on both
-devices, synced as commits ([Timeline v1](../protocol/timeline.md)). The other SDKs do not have it
-yet.
+Every SDK has one more, optional library from 1.2.0: one keyed state on both devices, synced as
+commits ([Timeline v1](../protocol/timeline.md)). It is `ZeroByteTimeline` in Swift,
+`cloud.zerobyte:zerobyte-timeline` in Kotlin, `@zerobyte-cloud/sdk/timeline` in JavaScript and
+`ZeroByte.Timeline` in .NET.
 
 The transport is an interface (`RelayTransport`, `IRelayTransport` in .NET). `Relay` implements it
 over HTTPS; you can implement it in memory for tests, or over another channel.

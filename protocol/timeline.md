@@ -84,8 +84,10 @@ relay protocol's: Timeline v1 runs on Relay Protocol v1.
 
 ## SDKs
 
-The Swift SDK implements Timeline v1 from 1.2.0, in the `ZeroByteTimeline` library: see
-[Swift](../sdk/swift.md#timeline). The Kotlin, JavaScript and .NET SDKs do not implement it yet.
+Every SDK implements Timeline v1 from 1.2.0: `ZeroByteTimeline` in [Swift](../sdk/swift.md#timeline),
+`zerobyte-timeline` in [Kotlin](../sdk/android.md#timeline), `@zerobyte-cloud/sdk/timeline` in
+[JavaScript](../sdk/javascript.md#timeline) and `ZeroByte.Timeline` in [.NET](../sdk/dotnet.md#timeline).
+All four pass the test vectors below.
 
 ## Test vectors
 

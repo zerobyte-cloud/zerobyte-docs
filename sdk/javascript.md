@@ -8,14 +8,14 @@
 | Runtimes | Browsers with WebCrypto, Node 20+, Deno, Bun, Cloudflare Workers |
 | Module | ES module, TypeScript types included |
 | Uses | WebCrypto (HKDF, SHA-256), `fetch`, `WebSocket` |
-| Dependencies | `@noble/ciphers` (MIT, audited) for ChaCha20-Poly1305, which WebCrypto lacks |
+| Dependencies | `@noble/ciphers` (MIT, audited) for ChaCha20-Poly1305, which WebCrypto lacks; `@noble/hashes` (MIT, audited) for the timeline's synchronous SHA-256 |
 
 ## Install
 
 The package is not on npm yet. Install it from GitHub at a tag:
 
 ```sh
-npm install github:zerobyte-cloud/zerobyte-js-sdk#v1.1.0
+npm install github:zerobyte-cloud/zerobyte-js-sdk#v1.2.0
 ```
 
 It installs as `@zerobyte-cloud/sdk`:
@@ -213,6 +213,46 @@ for await (const event of channel.events()) {
 `channel.closeCode` says why the relay closed the socket: 4000 another connection of this side
 replaced it, 1003 or 1009 a bad frame, 1008 rate limited.
 
+## Timeline
+
+`@zerobyte-cloud/sdk/timeline` keeps one keyed state on both devices and sends only what changed,
+as commits that every device merges into the same order ([Timeline v1](../protocol/timeline.md)).
+A key's entry is the one with the latest stamp, so both copies converge whatever order things
+arrive in, and a change made after seeing another always wins over it.
+
+```js
+import { Direction, Notify } from "@zerobyte-cloud/sdk";
+import { Timeline, TimelineRelay, TimelineSlot } from "@zerobyte-cloud/sdk/timeline";
+
+const timeline = saved ? Timeline.decode(saved) : new Timeline();
+
+// Setting a key to the value it already holds stages nothing.
+timeline.set(new TimelineSlot("plan", plan.id), planBytes);
+
+const outcome = await TimelineRelay.sync(timeline, {
+  credentials,
+  transport: relay,
+  sends: Direction.C2P,
+  notify: Notify.SILENT,
+  persist: (t) => save(t.encode()),
+});
+
+for (const update of outcome.updates) {
+  apply(update.slot, update.value); // null: deleted
+}
+```
+
+- `sync` reads and merges, persists, prunes, commits, answers a catch-up and writes, in that
+  order. It calls `persist` after reading and after writing; save the timeline there.
+- A device that can produce its own values again (from a database, say) creates its timeline with
+  `forgetsOwnValues` naming those collections and passes `values` to `sync`; the timeline then
+  keeps only their digests.
+- Two devices on the same network can skip the relay: send `encodeMessage(timeline.state())`,
+  answer the other's state with `timeline.catchUp(heads)` and `receive` each part.
+- A value must fit in one message (1 MiB); split larger values over keys.
+- Replica ids, commit ids and digests are lowercase hex; clocks and sequences are `BigInt`s.
+- Run one `sync` per timeline at a time.
+
 ## API reference
 
 ```ts
@@ -280,6 +320,38 @@ export function tagFromPayload(payload: unknown): string | null;
 export function fcmRegistration(options: { token: string; tag: string; alert?: string }): PushRegistration;
 export function pushFromData(data: Record<string, string> | null | undefined):
   { tag: string; notify: "alert" | "silent"; alert: string | null } | null;
+
+// "@zerobyte-cloud/sdk/timeline"
+export class TimelineSlot { constructor(collection: string, key: string); readonly collection: string;
+  readonly key: string }
+export class Timeline {
+  constructor(options?: { replica?: string; forgetsOwnValues?: Iterable<string>; maxMessageBytes?: number });
+  static decode(data: Uint8Array): Timeline;
+  encode(): Uint8Array;
+  value(slot: TimelineSlot): Uint8Array | null;
+  entries(collection: string): TimelineEntry[];
+  set(slot: TimelineSlot, value: Uint8Array): boolean;
+  delete(slot: TimelineSlot): boolean;
+  readonly hasPendingChanges: boolean;
+  receive(message: Uint8Array | TimelineMessage): TimelineReceipt;
+  state(request?: number): TimelineMessage;
+  catchUp(requesterHeads: Map<string, TimelineHead>,
+          options?: { includingOwn?: boolean; values?: (slot: TimelineSlot) => Uint8Array | null }):
+    TimelineMessage[];
+}
+export class TimelineRelay {
+  static sync(timeline: Timeline, options: { credentials: Credentials; transport: RelayTransport;
+    sends: 1 | 2; now?: number | bigint | Date; commitBudget?: number | null;
+    notify?: "none" | "alert" | "silent"; values?: (slot: TimelineSlot) => Uint8Array | null;
+    persist: (timeline: Timeline) => void | Promise<void> }):
+    Promise<TimelineSyncOutcome>;       // updates, merged, written, waiting, isPeerCurrent
+}
+export function encodeMessage(message: TimelineMessage): Uint8Array;
+export function decodeMessage(data: Uint8Array): TimelineMessage;
+export const TimelineLimits: { maxMessageBytes: 1048576; maxCollectionBytes: 64; maxKeyBytes: 1024 };
+export class TimelineError extends Error {
+  readonly code: "malformed" | "unsupported_version" | "too_large" | "diverged";
+}
 
 export interface RelayTransport {
   claim(): Promise<void>;
