@@ -194,11 +194,23 @@ foreach (var update in outcome.Updates)
 
 - `SyncAsync` reads and merges, persists, prunes, commits, answers a catch-up and writes, in that
   order. It calls `persist` after reading and after writing; save the timeline there.
+- A run with nothing new to send writes no envelope: a read that changed nothing is not
+  acknowledged, and a catch-up request with nothing to catch up on gets no answer.
+- A long catch-up, for a device that is new or lost its copy, goes out over several runs of about
+  8 MiB each (`TimelineRelay.CatchUpBudget`, or `commitBudget`). The timeline saves its place, so
+  the next run carries on.
+- `commitBudget` also caps how much one run commits; the rest stays pending.
+  `HasPendingChange(slot)` says whether a key's change is still waiting.
+- `outcome.Waiting` counts messages kept for the next run because the mailbox was full;
+  `outcome.IsPeerCurrent` says whether the other device has every commit of this one.
 - A device that can produce its own values again (from a database, say) creates its timeline with
   `forgetsOwnValues` naming those collections and passes `values` to `SyncAsync`; the timeline
-  then keeps only their digests.
+  then keeps only their digests. `values` must return the value as committed: a catch-up leaves
+  out a key whose value has changed since, until the change is set and committed.
 - Two devices on the same network can skip the relay: send `timeline.State().Encode()`, answer the
-  other's state with `timeline.CatchUp(heads)` and `Receive` each part.
+  other's state with `timeline.CatchUp(heads)` and `Receive` each part. Pass commits made there
+  with `Commit()` to `TimelineRelay.Enqueue` as well: the relay carries them unless the other
+  device confirms them first.
 - A value must fit in one message (1 MiB); split larger values over keys.
 - A `Timeline` is not thread-safe: run one `SyncAsync` per timeline at a time.
 
@@ -363,6 +375,8 @@ public sealed class Timeline
     public bool Set(TimelineSlot slot, ReadOnlySpan<byte> value);
     public bool Delete(TimelineSlot slot);
     public bool HasPendingChanges { get; }
+    public bool HasPendingChange(TimelineSlot slot);
+    public List<TimelineCommit> Commit(long? now = null, int? maximumBytes = null);
     public TimelineReceipt Receive(ReadOnlySpan<byte> data);
     public TimelineMessage.State State(TimelineRequest request = TimelineRequest.None);
     public List<TimelineMessage.CatchUp> CatchUp(
@@ -372,11 +386,13 @@ public sealed class Timeline
 
 public static class TimelineRelay
 {
+    public const long CatchUpBudget = 8L * 1_048_576;      // catch-up bytes per run
     public static Task<TimelineSyncOutcome> SyncAsync(
         Timeline timeline, Credentials credentials, IRelayTransport transport, Direction sends,
         Func<Timeline, Task> persist, Notify notify = Notify.None, int? commitBudget = null,
         Func<TimelineSlot, byte[]?>? values = null, long? now = null,
         CancellationToken ct = default);   // Updates, Merged, Written, Waiting, IsPeerCurrent
+    public static void Enqueue(IEnumerable<TimelineCommit> commits, Timeline timeline);
 }
 
 public static class TimelineLimits

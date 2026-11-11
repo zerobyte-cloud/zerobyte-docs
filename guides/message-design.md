@@ -45,6 +45,11 @@ still converge.
 A combination works well: send changes normally, and when the sender sees `quota_exceeded` or when
 the receiver asks for it, send a full snapshot instead.
 
+**Use a timeline.** When both devices edit the same data, [Timeline v1](../protocol/timeline.md)
+does all of this for you. It sends only the keys that changed, merges both devices' changes into
+one state, keeps what does not fit the mailbox for the next run, and catches up a device that is
+new, lost its copy or missed a commit, over several runs when the catch-up is long.
+
 ## Acknowledgements
 
 ZeroByte does not tell the sender when the receiver has read a message. If your app needs that, the
@@ -67,7 +72,8 @@ own change numbering), it sends:
 ```
 
 and the other side answers with a snapshot. This makes the link self-healing no matter what
-happened to the mailbox. See [Link lifecycle](link-lifecycle.md).
+happened to the mailbox. See [Link lifecycle](link-lifecycle.md). A timeline asks for and answers
+catch-ups itself.
 
 ## Idempotency
 

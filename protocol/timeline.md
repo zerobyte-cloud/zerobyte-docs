@@ -2,7 +2,7 @@
 
 Timeline v1 keeps one keyed state on both devices of a link and sends only what changed. The
 canonical text is
-[`timeline-v1.md`](https://github.com/zerobyte-cloud/zerobyte-protocol/blob/v1.2.0/timeline-v1.md)
+[`timeline-v1.md`](https://github.com/zerobyte-cloud/zerobyte-protocol/blob/master/timeline-v1.md)
 in zerobyte-protocol. This page explains how it works and when to use it.
 
 It runs on top of Relay Protocol v1 and changes nothing in it. A relay that carries envelopes
@@ -55,18 +55,26 @@ another replica's commits.
 
 Each replica writes in its own direction: the primary `p2c`, the companion `c2p`. One run:
 
-1. Fetch the other direction, open each envelope and merge each message in order.
+1. Fetch the other direction, open each envelope and merge each message in order. Drop queued
+   commits the other replica has confirmed, by its state or by the `seen` of its commits.
 2. Persist, then prune what was fetched.
 3. Commit pending changes.
-4. Answer a catch-up request, if there is one.
-5. Write the commits and catch-up parts not yet written; then a state if the run merged something
-   and wrote no commit, or if it asks for a catch-up.
+4. Answer a catch-up request, if there is one. A long answer goes out over several runs: the
+   replica saves its place, and the final part carries the heads from when the answer began. A
+   newer request replaces an answer still being written, and an answer with nothing the
+   requester lacks is not sent.
+5. Write the commits and catch-up parts not yet written; then a state if the run changed something
+   (merged a commit, replaced an entry or raised a head) and wrote no commit, or if it asks for a
+   catch-up. A read that changed nothing is not acknowledged.
 6. On `quota_exceeded`, stop and keep the rest for the next run.
 
-The last envelope of a run may ask the relay for a silent push to wake the other device.
+The last envelope of a run may ask the relay for a silent push to wake the other device. A run
+with nothing new to send writes no envelope.
 
 Two devices on the same network can skip the relay: each sends its state, answers the other's with
 a full catch-up, and closes. Commits the relay delivers later are skipped as already merged.
+Commits a device makes and sends during the exchange also wait for the relay, until the other
+device confirms them.
 
 ## Errors
 

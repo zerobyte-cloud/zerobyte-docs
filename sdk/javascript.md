@@ -244,11 +244,23 @@ for (const update of outcome.updates) {
 
 - `sync` reads and merges, persists, prunes, commits, answers a catch-up and writes, in that
   order. It calls `persist` after reading and after writing; save the timeline there.
+- A run with nothing new to send writes no envelope: a read that changed nothing is not
+  acknowledged, and a catch-up request with nothing to catch up on gets no answer.
+- A long catch-up, for a device that is new or lost its copy, goes out over several runs of about
+  8 MiB each (`TimelineRelay.CATCH_UP_BUDGET`, or `commitBudget`). The timeline saves its place,
+  so the next run carries on.
+- `commitBudget` also caps how much one run commits; the rest stays pending.
+  `hasPendingChange(slot)` says whether a key's change is still waiting.
+- `outcome.waiting` counts messages kept for the next run because the mailbox was full;
+  `outcome.isPeerCurrent` says whether the other device has every commit of this one.
 - A device that can produce its own values again (from a database, say) creates its timeline with
   `forgetsOwnValues` naming those collections and passes `values` to `sync`; the timeline then
-  keeps only their digests.
+  keeps only their digests. `values` must return the value as committed: a catch-up leaves out a
+  key whose value has changed since, until the change is set and committed.
 - Two devices on the same network can skip the relay: send `encodeMessage(timeline.state())`,
-  answer the other's state with `timeline.catchUp(heads)` and `receive` each part.
+  answer the other's state with `timeline.catchUp(heads)` and `receive` each part. Pass commits
+  made there with `commit()` to `TimelineRelay.enqueue` as well: the relay carries them unless
+  the other device confirms them first.
 - A value must fit in one message (1 MiB); split larger values over keys.
 - Replica ids, commit ids and digests are lowercase hex; clocks and sequences are `BigInt`s.
 - Run one `sync` per timeline at a time.
@@ -333,6 +345,8 @@ export class Timeline {
   set(slot: TimelineSlot, value: Uint8Array): boolean;
   delete(slot: TimelineSlot): boolean;
   readonly hasPendingChanges: boolean;
+  hasPendingChange(slot: TimelineSlot): boolean;
+  commit(options?: { now?: number | bigint | Date; maxBytes?: number | null }): TimelineCommit[];
   receive(message: Uint8Array | TimelineMessage): TimelineReceipt;
   state(request?: number): TimelineMessage;
   catchUp(requesterHeads: Map<string, TimelineHead>,
@@ -340,11 +354,13 @@ export class Timeline {
     TimelineMessage[];
 }
 export class TimelineRelay {
+  static readonly CATCH_UP_BUDGET: number;   // catch-up bytes per run, 8 MiB
   static sync(timeline: Timeline, options: { credentials: Credentials; transport: RelayTransport;
     sends: 1 | 2; now?: number | bigint | Date; commitBudget?: number | null;
     notify?: "none" | "alert" | "silent"; values?: (slot: TimelineSlot) => Uint8Array | null;
     persist: (timeline: Timeline) => void | Promise<void> }):
     Promise<TimelineSyncOutcome>;       // updates, merged, written, waiting, isPeerCurrent
+  static enqueue(commits: TimelineCommit[], timeline: Timeline): void;
 }
 export function encodeMessage(message: TimelineMessage): Uint8Array;
 export function decodeMessage(data: Uint8Array): TimelineMessage;

@@ -206,11 +206,23 @@ for (update in outcome.updates) {
 
 - `sync` reads and merges, persists, prunes, commits, answers a catch-up and writes, in that
   order. It calls the closure to persist after reading and after writing; save the timeline there.
+- A run with nothing new to send writes no envelope: a read that changed nothing is not
+  acknowledged, and a catch-up request with nothing to catch up on gets no answer.
+- A long catch-up, for a device that is new or lost its copy, goes out over several runs of about
+  8 MiB each (`TimelineRelay.CATCH_UP_BUDGET`, or `commitBudget`). The timeline saves its place,
+  so the next run carries on.
+- `commitBudget` also caps how much one run commits; the rest stays pending.
+  `hasPendingChange(slot)` says whether a key's change is still waiting.
+- `outcome.waiting` counts messages kept for the next run because the mailbox was full;
+  `outcome.isPeerCurrent` says whether the other device has every commit of this one.
 - A device that can produce its own values again (from a database, say) creates its timeline with
   `forgetsOwnValues` naming those collections and passes `values` to `sync`; the timeline then
-  keeps only their digests.
+  keeps only their digests. `values` must return the value as committed: a catch-up leaves out a
+  key whose value has changed since, until the change is set and committed.
 - Two devices on the same network can skip the relay: send `timeline.state().encoded()`, answer
-  the other's state with `timeline.catchUp(heads)` and `receive` each part.
+  the other's state with `timeline.catchUp(heads)` and `receive` each part. Pass commits made
+  there with `commit()` to `TimelineRelay.enqueue` as well: the relay carries them unless the
+  other device confirms them first.
 - A value must fit in one message (1 MiB); split larger values over keys.
 - A `Timeline` is not thread-safe: use it from one thread at a time.
 
@@ -407,6 +419,8 @@ class Timeline @JvmOverloads constructor(
     fun set(slot: TimelineSlot, value: ByteArray): Boolean
     fun delete(slot: TimelineSlot): Boolean
     val hasPendingChanges: Boolean
+    fun hasPendingChange(slot: TimelineSlot): Boolean
+    fun commit(now: Long = System.currentTimeMillis(), maximumBytes: Int? = null): List<TimelineCommit>
     fun receive(data: ByteArray): TimelineReceipt
     fun state(request: TimelineRequest = TimelineRequest.NONE): TimelineMessage.State
     fun catchUp(requesterHeads: Map<ReplicaID, TimelineHead>, includingOwn: Boolean = true,
@@ -415,11 +429,13 @@ class Timeline @JvmOverloads constructor(
 }
 
 object TimelineRelay {
+    const val CATCH_UP_BUDGET: Long = 8L * 1_048_576     // catch-up bytes per run
     fun sync(timeline: Timeline, credentials: Credentials, transport: RelayTransport,
              sends: Direction, now: Long = System.currentTimeMillis(), commitBudget: Int? = null,
              notify: Notify = Notify.NONE, values: (TimelineSlot) -> ByteArray? = { null },
              persist: (Timeline) -> Unit): TimelineSyncOutcome
         // updates, merged, written, waiting, isPeerCurrent
+    fun enqueue(commits: List<TimelineCommit>, timeline: Timeline)
 }
 
 object TimelineLimits {

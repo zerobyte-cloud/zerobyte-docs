@@ -25,7 +25,13 @@ Each SDK has the same four layers. Most apps use only `Credentials`, `Relay` and
 Every SDK has one more, optional library from 1.2.0: one keyed state on both devices, synced as
 commits ([Timeline v1](../protocol/timeline.md)). It is `ZeroByteTimeline` in Swift,
 `cloud.zerobyte:zerobyte-timeline` in Kotlin, `@zerobyte-cloud/sdk/timeline` in JavaScript and
-`ZeroByte.Timeline` in .NET.
+`ZeroByte.Timeline` in .NET, with the same parts in each (`SyncAsync` and `Enqueue` in .NET):
+
+| Part | Does |
+|---|---|
+| `Timeline` | The state: entries, pending changes, commits, merging and catch-ups. Saved as one file; can keep only digests of the values of collections the app can produce again |
+| `TimelineRelay.sync` | One run over the relay: read and merge, commit, answer a catch-up, write. A long catch-up goes out over several runs; a run with nothing new to send writes nothing |
+| `TimelineRelay.enqueue` | Queues commits made outside a run, for example sent directly, until the other device confirms them |
 
 The transport is an interface (`RelayTransport`, `IRelayTransport` in .NET). `Relay` implements it
 over HTTPS; you can implement it in memory for tests, or over another channel.

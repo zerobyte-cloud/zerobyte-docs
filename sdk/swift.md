@@ -192,11 +192,23 @@ for update in outcome.updates {
 
 - `sync` reads and merges, persists, prunes, commits, answers a catch-up and writes, in that
   order. It calls the closure to persist after reading and after writing; save the timeline there.
+- A run with nothing new to send writes no envelope: a read that changed nothing is not
+  acknowledged, and a catch-up request with nothing to catch up on gets no answer.
+- A long catch-up, for a device that is new or lost its copy, goes out over several runs of about
+  8 MiB each (`TimelineRelay.catchUpBudget`, or `commitBudget:`). The timeline saves its place, so
+  the next run carries on.
+- `commitBudget:` also caps how much one run commits; the rest stays pending.
+  `hasPendingChange(at:)` says whether a key's change is still waiting.
+- `outcome.waiting` counts messages kept for the next run because the mailbox was full;
+  `outcome.isPeerCurrent` says whether the other device has every commit of this one.
 - A device that can produce its own values again (from a database, say) creates its timeline with
   `forgetsOwnValues:` naming those collections and passes `values:` to `sync`; the timeline then
-  keeps only their digests.
+  keeps only their digests. `values:` must return the value as committed: a catch-up leaves out a
+  key whose value has changed since, until the change is set and committed.
 - Two devices on the same network can skip the relay: send `timeline.state()`, answer the other's
-  state with `timeline.catchUp(after:)` and `receive` each part.
+  state with `timeline.catchUp(after:)` and `receive` each part. Pass commits made there with
+  `commit(now:)` to `TimelineRelay.enqueue(_:in:)` as well: the relay carries them unless the
+  other device confirms them first.
 - A value must fit in one message (1 MiB); split larger values over keys.
 
 ## Unpair
@@ -385,6 +397,8 @@ public struct Timeline {
     @discardableResult public mutating func set(_ value: Data, at slot: TimelineSlot) throws -> Bool
     @discardableResult public mutating func delete(_ slot: TimelineSlot) throws -> Bool
     public var hasPendingChanges: Bool
+    public func hasPendingChange(at slot: TimelineSlot) -> Bool
+    public mutating func commit(now: Date, maximumBytes: Int? = nil) -> [TimelineCommit]
     public mutating func receive(_ data: Data) throws -> TimelineReceipt
     public func state(request: TimelineRequest = []) -> TimelineMessage
     public func catchUp(after requesterHeads: [ReplicaID: TimelineHead], includingOwn: Bool = true,
@@ -392,12 +406,14 @@ public struct Timeline {
 }
 
 public enum TimelineRelay {
+    public static let catchUpBudget = 8 * 1_048_576     // catch-up bytes per run
     public static func sync(_ timeline: inout Timeline, credentials: Credentials,
                             transport: any RelayTransport, sends: Direction, now: Date = Date(),
                             commitBudget: Int? = nil, notify: Notify = .none,
                             values: (TimelineSlot) -> Data? = { _ in nil },
                             persist: (Timeline) async throws -> Void) async throws
         -> TimelineSyncOutcome            // updates, merged, written, waiting, isPeerCurrent
+    public static func enqueue(_ commits: [TimelineCommit], in timeline: inout Timeline)
 }
 
 public enum TimelineLimits {

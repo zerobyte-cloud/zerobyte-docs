@@ -133,3 +133,26 @@ RELAY_BASE=http://127.0.0.1:8080/v1/ RELAY_APP=<registered app id> <test command
 ```
 
 `RELAY_SIGNAL_APP=<app id with signal;ice>` adds the live tests of the extensions.
+
+## Timeline v1
+
+[Timeline v1](timeline.md) has its own file,
+[`spec/timeline.json`](https://github.com/zerobyte-cloud/zerobyte-protocol/blob/master/spec/timeline.json),
+produced the same way by
+[`spec/timeline.py`](https://github.com/zerobyte-cloud/zerobyte-protocol/blob/master/spec/timeline.py),
+an independent reference that uses only the Python standard library. It holds clock steps, three
+commits with their encodings and ids, one message of each type, two merge orders that must reach
+the same state, a catch-up selection and the rejections.
+
+```sh
+python3 spec/timeline.py > spec/timeline.json
+```
+
+| Repository | Copied to |
+|---|---|
+| zerobyte-swift-sdk | `Tests/ZeroByteTimelineTests/timeline.json` |
+| zerobyte-android-sdk | `zerobyte-timeline/src/test/resources/timeline.json` |
+| zerobyte-js-sdk | `test/timeline.json` |
+| zerobyte-dotnet-sdk | `test/ZeroByte.Tests/timeline.json` |
+
+The same test commands run them, together with two timelines syncing through a relay in memory.

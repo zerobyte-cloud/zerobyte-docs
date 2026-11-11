@@ -34,6 +34,8 @@ Build it in this order, each tested before the next:
 5. **Link.** Sequence choice and conflict retry on send, the fetch-open-prune loop on receive,
    erase. One operation at a time. See [Client behaviour](../protocol/client-behaviour.md).
 6. **Watch.** Optional. See [Watch WebSocket](../protocol/watch.md).
+7. **Timeline.** Optional: one keyed state on both devices, carried in the link's envelopes. See
+   [Timeline v1](../protocol/timeline.md), and test it against `spec/timeline.json` as well.
 
 ## Test vectors
 

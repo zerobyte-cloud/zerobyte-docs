@@ -29,6 +29,11 @@ Optional [extensions](../protocol/extensions.md) add what a dedicated app needs 
 wake the other device (APNs and FCM, as separate modules), and a sealed signal channel with STUN/TURN for
 setting up a direct, peer-to-peer connection while both devices are online.
 
+[Timeline v1](../protocol/timeline.md), an optional library in every SDK, keeps one keyed state on
+both devices over the same envelopes. Each device sends only the keys it changed, both merge every
+change into the same order, and a device that is new or lost its copy catches up from the other.
+It needs nothing from the relay.
+
 ## Where it fits
 
 ZeroByte is for data the servers in between should not be able to read, moving between two
@@ -42,7 +47,8 @@ devices that met once:
 - **Private AI on your own hardware.** A phone sends data to a model on its owner's computer and
   gets the answer back, with no cloud service in the middle that could read either.
 - **Sync without a backend.** A phone and a laptop, or a tablet and a watch, keep one app's private
-  data in step without a server that stores it or an account to protect.
+  data in step without a server that stores it or an account to protect. A
+  [timeline](../protocol/timeline.md) merges both devices' changes into one state.
 
 ## How it fits together
 
@@ -73,8 +79,9 @@ devices that met once:
 
 ## What ZeroByte is not
 
-- **Not a sync engine.** It delivers opaque messages in order between exactly two devices. Merging
-  state, resolving conflicts and choosing what to send are your app's job. See
+- **Not a general sync engine.** A link delivers opaque messages in order between exactly two
+  devices. [Timeline v1](../protocol/timeline.md) keeps one keyed state on both, where the latest
+  change to a key wins; finer merges, such as of text or counters, are your app's job. See
   [Designing messages](../guides/message-design.md).
 - **Not a backup.** Envelopes are deleted once read and the whole mailbox is deleted after 30 idle
   days. Nothing on the relay is meant to last.

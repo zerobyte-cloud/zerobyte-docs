@@ -47,4 +47,6 @@ With 64 slots and 32 MiB per mailbox, a direction can hold, for example, 64 mess
 or 32 messages of 1 MiB before the mailbox total runs out. If your companion may be offline for
 days while the primary keeps producing changes, coalesce changes into fewer, larger messages, or
 send a "full state" message that supersedes older ones. See
-[Designing messages](../guides/message-design.md).
+[Designing messages](../guides/message-design.md). A [timeline](timeline.md) does this itself: it
+sends only the keys that changed, packs its commits into as few envelopes as fit, and keeps what the
+mailbox has no room for until its next run.
